@@ -352,7 +352,8 @@ def verify_callback(call):
             "🎒 `/wishlist IND 12345678`\n"
             "✍️ `/bio IND UID JWT NAYA_BIO`\n"
             "⚡ `/bio2 IND UID ACCESS_TOKEN NAYA_BIO`\n"
-            "🔑 `/token ACCESS_TOKEN`\n\n"
+            "🔑 `/token ACCESS_TOKEN`\n"
+            "📊 `/level IND 12345678`\n\n"
             "━━━━━━━━━━━━━━━━━━━━━\n"
             "💡 */start ya /help se poori guide dekho!*"
         )
@@ -422,7 +423,7 @@ def send_welcome(message):
         "✅ *Tum verified ho! Rolex VIP System Ready!* ⚡\n\n"
         "📋 **AVAILABLE COMMANDS:**\n\n"
         "🔥 **BAN CHECK**\n"
-        "`/ban IND 987654321`\n\n"
+        "`/checkban IND 987654321`\n\n"
         "🏴‍☠️ **BLACKLIST CHECK**\n"
         "`/blacklist IND 987654321`\n\n"
         "❤️ **LIKES CHECK**\n"
@@ -435,6 +436,8 @@ def send_welcome(message):
         "`/bio2 IND UID ACCESS_TOKEN NAYA_BIO`\n\n"
         "🔑 **JWT TOKEN NIKALO**\n"
         "`/token ACCESS_TOKEN`\n\n"
+        "📊 **LEVEL PROGRESS CHECK**\n"
+        "`/level IND 987654321`\n\n"
         "━━━━━━━━━━━━━━━━━━━━━\n"
         "💡 *Servers: IND | SG | BR | US | ME | SAC | NA*\n"
         "🔰 *Powered by Rolex VIP Engine*"
@@ -755,18 +758,18 @@ def handle_checklike(message):
     bot_executor.submit(_fetch_likes)
 
 # ==========================================
-# 🎮 11. COMMAND: /ban
+# 🎮 11. COMMAND: /checkban
 # ==========================================
-@bot.message_handler(commands=['ban'])
-def handle_ban(message):
+@bot.message_handler(commands=['checkban'])
+def handle_checkban(message):
     if not check_security(message): return
     args = message.text.split()
     if len(args) != 3:
         bot.reply_to(
             message,
             "❌ **Wrong Format!**\n\n"
-            "✅ *Sahi Format:*\n`/ban SERVER UID`\n\n"
-            "📌 *Example:*\n`/ban IND 987654321`\n\n"
+            "✅ *Sahi Format:*\n`/checkban SERVER UID`\n\n"
+            "📌 *Example:*\n`/checkban IND 987654321`\n\n"
             "🌍 *Servers:* IND, SG, BR, US, ME, SAC, NA",
             parse_mode="Markdown"
         )
@@ -806,18 +809,18 @@ def handle_ban(message):
     bot_executor.submit(_fetch_ban)
 
 # ==========================================
-# 🎮 12. COMMAND: /blacklist
+# 🎮 12. COMMAND: /checkblacklist
 # ==========================================
-@bot.message_handler(commands=['blacklist'])
-def handle_blacklist(message):
+@bot.message_handler(commands=['checkblacklist'])
+def handle_checkblacklist(message):
     if not check_security(message): return
     args = message.text.split()
     if len(args) != 3:
         bot.reply_to(
             message,
             "❌ **Wrong Format!**\n\n"
-            "✅ *Sahi Format:*\n`/blacklist SERVER UID`\n\n"
-            "📌 *Example:*\n`/blacklist IND 987654321`\n\n"
+            "✅ *Sahi Format:*\n`/checkblacklist SERVER UID`\n\n"
+            "📌 *Example:*\n`/checkblacklist IND 987654321`\n\n"
             "🌍 *Servers:* IND, SG, BR, US, ME, SAC, NA",
             parse_mode="Markdown"
         )
@@ -854,6 +857,176 @@ def handle_blacklist(message):
             bot.edit_message_text(f"❌ *Server Error:* `{e}`", chat_id=message.chat.id, message_id=status_msg.message_id, parse_mode="Markdown")
 
     bot_executor.submit(_fetch_blacklist)
+
+# ==========================================
+# 🎮 13b. COMMAND: /level  (EXP Progress)
+# ==========================================
+
+# ── Free Fire Level EXP Table (calibrated) ──
+# Formula: EXP to reach level N = (N-1) * [11000 + 500*(N-2)]
+# Verified: Level 71 threshold ≈ 3,185,000 (player at 3,225,734 = inside L71 ✓)
+def _build_ff_exp_table(max_level=85):
+    table = {}
+    cumulative = 0
+    table[1] = 0
+    for n in range(1, max_level + 1):
+        table[n] = cumulative
+        cumulative += 11000 + (n - 1) * 1000   # EXP needed to go n → n+1
+    table[max_level + 1] = cumulative           # sentinel for max level
+    return table
+
+FF_LEVEL_EXP = _build_ff_exp_table()
+FF_MAX_LEVEL  = 80   # Free Fire current max level
+
+def get_level_progress(level, total_exp):
+    """
+    Returns dict:
+      current_threshold  — EXP needed to reach current level
+      next_threshold     — EXP needed to reach next level
+      exp_in_level       — EXP earned inside current level
+      exp_needed         — EXP still needed for next level
+      level_total_exp    — Total EXP span of this level
+      percent            — Progress % inside current level
+      approx_games       — Approx ranked matches to level up (~1000 EXP/match)
+    """
+    cur  = FF_LEVEL_EXP.get(level,     FF_LEVEL_EXP.get(level,     0))
+    nxt  = FF_LEVEL_EXP.get(level + 1, FF_LEVEL_EXP.get(FF_MAX_LEVEL + 1, cur + 100000))
+
+    exp_in_level   = max(0, total_exp - cur)
+    level_total    = max(1, nxt - cur)
+    exp_needed     = max(0, nxt - total_exp)
+    percent        = min(100.0, (exp_in_level / level_total) * 100)
+    approx_games   = max(1, round(exp_needed / 1000))
+
+    return {
+        "current_threshold": cur,
+        "next_threshold":    nxt,
+        "exp_in_level":      exp_in_level,
+        "exp_needed":        exp_needed,
+        "level_total_exp":   level_total,
+        "percent":           percent,
+        "approx_games":      approx_games,
+    }
+
+def make_progress_bar(percent, length=10):
+    filled = round((percent / 100) * length)
+    return "▓" * filled + "░" * (length - filled)
+
+
+@bot.message_handler(commands=['level'])
+def handle_level(message):
+    if not check_security(message): return
+    args = message.text.split()
+    if len(args) != 3:
+        bot.reply_to(
+            message,
+            "❌ **Wrong Format!**\n\n"
+            "✅ *Sahi Format:*\n`/level SERVER UID`\n\n"
+            "📌 *Example:*\n`/level IND 987654321`\n\n"
+            "🌍 *Servers:* IND, SG, BR, US, ME, SAC, NA\n\n"
+            "💡 *Batayega:* Next level ke liye kitna EXP chahiye!",
+            parse_mode="Markdown"
+        )
+        return
+
+    server = args[1].upper()
+    uid    = args[2]
+    status_msg = bot.reply_to(
+        message,
+        "📊 *Level progress check kiya ja raha hai...*\n_3-5 second lagenge_",
+        parse_mode="Markdown"
+    )
+
+    def _fetch_level():
+        try:
+            res = requests.get(INFO_API_URL, params={"region": server, "uid": uid}).json()
+
+            data = None
+            if isinstance(res, list) and len(res) > 0:
+                data = res[0]
+            elif isinstance(res, dict) and "basicInfo" in res:
+                data = res
+
+            if not data:
+                bot.edit_message_text(
+                    "❌ **Data nahi mila!**\n\n🔎 *Reasons:*\n"
+                    "• UID galat hai\n• Server galat hai\n• API down hai\n\n"
+                    "💡 *Dobara try karo!*",
+                    chat_id=message.chat.id,
+                    message_id=status_msg.message_id,
+                    parse_mode="Markdown"
+                )
+                return
+
+            basic     = data.get("basicInfo", {})
+            name      = basic.get("nickname",      "Unknown")
+            region    = basic.get("region",        server)
+            level     = int(basic.get("level",     0))
+            total_exp = int(basic.get("exp",       0))
+
+            if level == 0:
+                bot.edit_message_text(
+                    "❌ **Level data nahi mila!**\n💡 *UID ya Server check karo.*",
+                    chat_id=message.chat.id,
+                    message_id=status_msg.message_id,
+                    parse_mode="Markdown"
+                )
+                return
+
+            if level >= FF_MAX_LEVEL:
+                # Max level player
+                text = (
+                    "🎮 **LEVEL PROGRESS — RESULT** 🎮\n"
+                    "━━━━━━━━━━━━━━━━━━━━━\n"
+                    f"👤 **Player:** `{name}`\n"
+                    f"🆔 **UID:** `{uid}`\n"
+                    f"🌍 **Server:** `{region}`\n"
+                    "━━━━━━━━━━━━━━━━━━━━━\n"
+                    f"🏆 **Level:** `{level}` *(MAX LEVEL!)* 👑\n"
+                    f"⭐ **Total EXP:** `{total_exp:,}`\n"
+                    "━━━━━━━━━━━━━━━━━━━━━\n"
+                    "🎉 *Is player ne max level reach kar liya hai!*\n"
+                    "👑 *Ye ek legend hai!* ⚡\n"
+                    "━━━━━━━━━━━━━━━━━━━━━\n"
+                    "✅ *Checked by Rolex VIP Engine* ⚡"
+                )
+            else:
+                prog = get_level_progress(level, total_exp)
+                bar  = make_progress_bar(prog["percent"])
+
+                text = (
+                    "🎮 **LEVEL PROGRESS — RESULT** 🎮\n"
+                    "━━━━━━━━━━━━━━━━━━━━━\n"
+                    f"👤 **Player:** `{name}`\n"
+                    f"🆔 **UID:** `{uid}`\n"
+                    f"🌍 **Server:** `{region}`\n"
+                    "━━━━━━━━━━━━━━━━━━━━━\n"
+                    f"🏆 **Current Level:** `{level}`\n"
+                    f"⭐ **Total EXP:** `{total_exp:,}`\n"
+                    "━━━━━━━━━━━━━━━━━━━━━\n"
+                    f"📊 **Level Progress:**\n"
+                    f"`{bar}` {prog['percent']:.1f}%\n"
+                    f"EXP in Level: `{prog['exp_in_level']:,}` / `{prog['level_total_exp']:,}`\n"
+                    "━━━━━━━━━━━━━━━━━━━━━\n"
+                    f"🚀 **Next Level:** `{level + 1}`\n"
+                    f"💎 **EXP Needed:** `{prog['exp_needed']:,}`\n"
+                    f"🎯 **Approx Games:** ~`{prog['approx_games']}` ranked matches\n"
+                    "━━━━━━━━━━━━━━━━━━━━━\n"
+                    "✅ *Checked by Rolex VIP Engine* ⚡"
+                )
+
+            bot.delete_message(chat_id=message.chat.id, message_id=status_msg.message_id)
+            send_result_with_video(message.chat.id, text)
+
+        except Exception as e:
+            bot.edit_message_text(
+                f"❌ *Server Error:* `{e}`",
+                chat_id=message.chat.id,
+                message_id=status_msg.message_id,
+                parse_mode="Markdown"
+            )
+
+    bot_executor.submit(_fetch_level)
 
 # ==========================================
 # 🎮 13. COMMAND: /bio (Direct JWT)
